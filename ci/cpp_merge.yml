@@ -1,0 +1,114 @@
+cpp_merge:
+  stage: review_merge
+  tags:
+  - astra16
+  variables:
+    GIT_SUBMODULE_STRATEGY: recursive
+  script:
+  - touch cppcheck-result.txt
+  - touch error.txt
+  - touch warnings.txt
+  - git fetch origin $CI_MERGE_REQUEST_TARGET_BRANCH_NAME
+  - git diff --name-only HEAD origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME | grep -E '\.(cpp|c|h)$' > changed_files.txt || true
+
+  - |
+    if [[ ! -s changed_files.txt ]]; then
+      echo "Нет измененных файлов для анализа."
+      exit 0  # Завершаем pipeline успешно
+    else
+      echo "Измененные файлы для анализа:"
+      cat changed_files.txt
+    fi
+
+  - |
+    touch existing_files.txt
+    while read -r file; do
+      if [[ -f "$file" ]]; then
+        echo "$file существует. Добавляем в список для анализа."
+        echo "$file" >> existing_files.txt
+      else
+        echo "$file не существует. Пропускаем."
+      fi
+    done < changed_files.txt
+
+    if [[ ! -s existing_files.txt ]]; then
+      echo "Нет существующих файлов для анализа."
+      exit 0  # Завершаем pipeline успешно
+    else
+      echo "Анализируем следующие файлы:"
+        cat existing_files.txt
+      # warning - включает проверку на потенциальные проблемы в коде, которые могут привести к ошибкам
+      # performance - анализирует эффективность кода и находит возможности оптимизации
+      # portability - проверяет переносимость кода между различными платформами и компиляторами
+      # information - предоставляет информационные сообщения о структуре кода
+      # missingInclude - обнаруживает пропущенные директивы включения заголовочных файлов
+      cppcheck --enable=warning,performance,portability,information,missingInclude \
+        --std=c++11 --library=/usr/share/cppcheck/cfg/qt.cfg --verbose --quiet -j8 --platform=unix64 \
+        --file-list=existing_files.txt 2> cppcheck-result.txt
+
+      # --library=qt.cfg - подключает конфигурацию для работы с Qt-фреймворком
+      # >>> Проверка корректности связывания сигналов и слотов
+      # >>> Анализ использования метаобъектной системы
+      # >>> Контроль правильного управления памятью в Qt
+      # >>> Проверка соответствия кодировочных конвенций Qt
+     
+      # -j8 - указывает использовать 8 параллельных потоков для анализа
+      # --quiet - минимизирует вывод только критичных сообщений
+      # --verbose - включает подробный режим вывода информации
+
+      # cppcheck --enable=all --inconclusive --std=c++11 --suppress=missingInclude --file-list=existing_files.txt 2> cppcheck-result.txt
+    fi
+  - |
+    grep '(error)' cppcheck-result.txt > errors.txt || true
+    grep '(warning)' cppcheck-result.txt > warnings.txt || true
+    grep '(warning, inconclusive)' cppcheck-result.txt > warnings.txt || true
+
+    if [[ -s errors.txt ]]; then
+      echo "Найдены ошибки:"
+      cat errors.txt
+      exit 1  # Завершаем pipeline с ошибкой
+    else
+      echo "Ошибок не найдено."
+      exit 0
+    fi
+
+    if [[ -s warnings.txt ]]; then
+      echo "Найдены предупреждения:"
+      cat warnings.txt
+    else
+      echo "Предупреждений не найдено."
+    fi
+
+  rules:
+  - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+
+  artifacts:
+    when: always
+    paths:
+    - cppcheck-result.txt
+    - errors.txt
+    - warnings.txt
+    - changed_files.txt
+
+  after_script:
+  - |
+    if [[ -s errors.txt ]]; then
+      COMMENT_ERROR="$(sed 's/^/:boom:/' errors.txt | sed 's/$/  /')"
+      curl --request POST \
+        --header "PRIVATE-TOKEN: token" \
+        --data-urlencode "body=$COMMENT_ERROR" \
+        "$CI_API_V4_URL/projects/$CI_PROJECT_ID/merge_requests/$CI_MERGE_REQUEST_IID/notes"
+    else
+      COMMENT="CppCheck не нашел критических ошибок."
+      curl --request POST \
+        --header "PRIVATE-TOKEN: token" \
+        --data-urlencode "body=$COMMENT" \
+        "$CI_API_V4_URL/projects/$CI_PROJECT_ID/merge_requests/$CI_MERGE_REQUEST_IID/notes"
+    fi
+    if [[ -s warnings.txt ]]; then
+      COMMENT_WARNING="$(sed 's/^/:raised_hand:/' warnings.txt | sed 's/$/  /')"
+      curl --request POST \
+        --header "PRIVATE-TOKEN: token" \
+        --data-urlencode "body=$COMMENT_WARNING" \
+        "$CI_API_V4_URL/projects/$CI_PROJECT_ID/merge_requests/$CI_MERGE_REQUEST_IID/notes"
+    fi

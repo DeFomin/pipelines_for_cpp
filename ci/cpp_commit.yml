@@ -1,0 +1,70 @@
+all_commit:
+  stage: all_commit
+  tags:
+  - astra16
+  script:
+  - mkdir -p cppcheck_report
+  - touch cppcheck_report/results.txt
+  - touch cppcheck_report/errors.txt
+  - touch cppcheck_report/warnings.txt
+
+  - git diff --name-only --diff-filter=d HEAD~1 HEAD | grep -E '\.(cpp|c|h|hpp)$' > cppcheck_report/changed_files.txt || true
+
+  - |
+    # Проверяем наличие изменённых файлов
+    if [[ ! -s cppcheck_report/changed_files.txt ]]; then
+      echo "Нет изменённых C/C++ файлов для анализа."
+      exit 0
+    fi
+
+    echo "Изменённые файлы для анализа:"
+    cat cppcheck_report/changed_files.txt
+
+    # Проверяем существование файлов
+    touch cppcheck_report/existing_files.txt
+    while read -r file; do
+      if [[ -f "$file" ]]; then
+        echo "$file существует. Добавляем в список для анализа."
+        echo "$file" >> cppcheck_report/existing_files.txt
+      else
+        echo "$file не существует. Пропускаем."
+      fi
+    done < cppcheck_report/changed_files.txt
+
+    if [[ ! -s cppcheck_report/existing_files.txt ]]; then
+      echo "Нет существующих файлов для анализа."
+      exit 0
+    fi
+
+    echo "Анализируем следующие файлы:"
+    cat cppcheck_report/existing_files.txt
+
+    cppcheck --enable=warning,performance,portability,information,missingInclude \
+      --std=c++11 --library=qt.cfg --verbose --quiet -j8 \
+      --file-list=cppcheck_report/existing_files.txt 2> cppcheck_report/results.txt
+
+  - |
+    grep '(error)' cppcheck_report/results.txt > cppcheck_report/errors.txt || true
+    grep '(warning)' cppcheck_report/results.txt > cppcheck_report/warnings.txt || true
+    grep '(warning, inconclusive)' cppcheck_report/results.txt >> cppcheck_report/warnings.txt || true
+
+    echo "=== Результаты cppcheck ==="
+    echo "Ошибки:"
+    cat cppcheck_report/errors.txt
+    echo ""
+    echo "Предупреждения:"
+    cat cppcheck_report/warnings.txt
+    echo ""
+
+    if [[ -s cppcheck_report/errors.txt ]]; then
+      echo "Найдены критические ошибки!"
+      exit 1
+    fi
+
+  rules:
+  - if: '$CI_COMMIT_BRANCH'
+
+  artifacts:
+    when: always
+    paths:
+    - cppcheck_report/

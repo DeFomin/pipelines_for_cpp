@@ -1,0 +1,9 @@
+stages:
+  - review_commit    
+  - review_merge     
+  - format           
+
+include:
+  - '/ci/cpp_commit.yml'
+  - '/ci/cpp_merge.yml'
+  - '/ci/formater.yml'

@@ -1,0 +1,43 @@
+stages:
+- format
+
+clang-format:
+  stage: format
+  tags:
+  - astra16
+  script:
+  - apt-get update && apt-get install -y clang-format git
+  - touch changed_files.txt
+
+  - git diff --name-only HEAD~1 HEAD | grep -E '\.(cpp|h)$' > changed_files.txt
+
+  - |
+    if [ ! -s changed_files.txt ]; then
+      echo "Нет измененных файлов для форматирования."
+      exit 0
+    fi
+
+  - cat changed_files.txt | xargs -n1 -I{} sh -c "echo 'Formatting {}'; clang-format -style=file -assume-filename=~/.clang-format -i {}"
+
+  - git add $(cat changed_files.txt)
+
+  - |
+    if git diff --cached --quiet; then
+      echo "Нет изменений после форматирования."
+      exit 0
+    fi
+
+  - |
+    git config --global user.name "$GIT_AUTHOR_NAME"
+    git config --global user.email "$GIT_AUTHOR_EMAIL"
+    git commit -m "Apply clang-format to modified files [skip ci]"
+
+  - |
+    git remote set-url origin "https://oauth2:$GIT_ACCESS_TOKEN@$CI_SERVER_HOST/$CI_PROJECT_PATH.git"
+    git push origin HEAD:$CI_COMMIT_REF_NAME
+  rules:
+  - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_REF_NAME != "main"'
+  variables:
+    GIT_AUTHOR_NAME: "$CI_COMMIT_AUTHOR"
+    GIT_AUTHOR_EMAIL: "$CI_COMMIT_AUTHOR_EMAIL"
+    GIT_ACCESS_TOKEN: "$GIT_ACCESS_TOKEN"

@@ -1,0 +1,11 @@
+#!/bin/bash
+CLANG_FORMAT="clang-format -style=file -assume-filename=../../pre_commit/.clang-format -i"
+GIT_DIFF="git diff --cached --name-only --diff-filter=ACM"
+FILES=$(eval ${GIT_DIFF} | grep -E '.*\.(cpp|h|c)$')
+
+if [ -n "$FILES" ]; then
+  echo "$FILES" | xargs -n1 -I{} sh -c "echo 'Formatting {}'; ${CLANG_FORMAT} {}"
+  git add $FILES  # изменения в индексе
+else
+  echo "No files to format."
+fi
